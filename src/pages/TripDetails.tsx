@@ -10,7 +10,7 @@ const TripDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   // Trazemos o updateTrip do Zustand:
-  const { trips, updateTrip } = useTripStore(); 
+  const { trips, updateTrip, deleteTrip } = useTripStore(); 
   const trip = trips.find((t) => t.id === id);
   
   const [activeTab, setActiveTab] = useState<TabType>('resumo');
@@ -46,6 +46,16 @@ const TripDetails = () => {
     setExpenseDesc('');
     setExpenseAmount('');
     setIsExpenseModalOpen(false);
+  };
+
+  // Função para deletar a viagem inteira
+  const handleDeleteTrip = () => {
+    if (!trip) return;
+    
+    if (window.confirm(`Tem certeza que deseja excluir o roteiro para ${trip.destination}? Essa ação apagará todos os custos e atividades, e não pode ser desfeita.`)) {
+      deleteTrip(trip.id); // Apaga no Firebase e no estado global
+      navigate('/'); // Redireciona o usuário de volta para o Dashboard
+    }
   };
 
   // Função para excluir uma despesa
@@ -131,10 +141,23 @@ const TripDetails = () => {
             </div>
 
             <div className="bg-blue-50 border border-blue-100 p-5 rounded-3xl">
-              <h3 className="text-sm font-bold text-blue-900 mb-2">Dica de Planejamento</h3>
-              <p className="text-sm text-blue-800 leading-relaxed">
-                Este roteiro está sendo salvo localmente no seu celular. Você poderá acessá-lo mesmo sem internet durante os passeios. Lembre-se de organizar bem os detalhes daquele momento especial que está planejando!
-              </p>
+                <h3 className="text-sm font-bold text-blue-900 mb-2 flex items-center">
+                    Dica Inteligente
+                </h3>
+                <p className="text-sm text-blue-800 leading-relaxed">
+                    {trip.aiTip ? trip.aiTip : "Organize bem seu roteiro e baixe os mapas offline antes de sair do hotel!"}
+                </p>
+            </div>
+
+            {/* BOTÃO DE EXCLUIR VIAGEM */}
+            <div className="pt-6 mt-2">
+              <button 
+                onClick={handleDeleteTrip}
+                className="w-full py-4 bg-red-50 text-red-600 font-bold rounded-2xl flex items-center justify-center active:scale-95 transition-transform border border-red-100"
+              >
+                <Trash2 size={20} className="mr-2" />
+                Excluir Roteiro
+              </button>
             </div>
           </div>
         )}

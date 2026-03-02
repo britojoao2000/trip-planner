@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { Trip } from '../types/trip';
 import { db } from '../lib/firebase';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI("AIzaSyAPWwfZ-59BXwkKlY88N4NZm7-nXrrJH4Y");
 
 interface TripState {
   trips: Trip[];
@@ -44,13 +47,31 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   addTrip: async (trip: Trip) => {
-    try {
-      const tripRef = doc(db, 'trips', trip.id);
-      await setDoc(tripRef, trip); // Salva na nuvem
-    } catch (error) {
-      console.error("Erro ao adicionar viagem:", error);
-    }
-  },
+  try {
+    // 1. Instancia o modelo
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    // 2. Monta o prompt dinâmico
+    const prompt = `Escreva uma dica de planejamento de viagem muito útil, em português, com no máximo 3 frases, para o destino: ${trip.destination}.`;
+    
+    // 3. Pede para a IA gerar
+    const result = await model.generateContent(prompt);
+    const generatedTip = result.response.text();
+
+    // 4. Adiciona a dica gerada ao objeto da viagem
+    const tripWithAI = { ...trip, aiTip: generatedTip };
+
+    // 5. Salva no Firestore (já com a dica embutida!)
+    const tripRef = doc(db, 'trips', tripWithAI.id);
+    await setDoc(tripRef, tripWithAI);
+    
+  } catch (error) {
+    console.error("Erro ao gerar dica ou salvar:", error);
+    // Fallback: salva sem a dica caso falhe ou fique sem internet
+    const tripRef = doc(db, 'trips', trip.id);
+    await setDoc(tripRef, trip);
+  }
+},
 
   updateTrip: async (id: string, updatedTrip: Partial<Trip>) => {
     try {

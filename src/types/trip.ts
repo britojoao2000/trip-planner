@@ -18,5 +18,6 @@ export interface Trip {
   travelers: string[];
   expenses: Expense[];
   itinerary: ItineraryItem[];
-  secretCode: string; // Para o "Login" simples
+  secretCode: string;
+  aiTip?: string;
 }
