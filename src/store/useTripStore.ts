@@ -4,8 +4,6 @@ import { db } from '../lib/firebase';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI("AIzaSyAPWwfZ-59BXwkKlY88N4NZm7-nXrrJH4Y");
-
 interface TripState {
   trips: Trip[];
   isAuthenticated: boolean;
@@ -30,7 +28,6 @@ export const useTripStore = create<TripState>((set, get) => ({
 
   logout: () => set({ isAuthenticated: false }),
 
-  // 📡 ESTA É A MÁGICA DO TEMPO REAL
   listenToTrips: () => {
     const tripsCol = collection(db, 'trips');
     
@@ -47,31 +44,33 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   addTrip: async (trip: Trip) => {
-  try {
-    // 1. Instancia o modelo
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    
-    // 2. Monta o prompt dinâmico
-    const prompt = `Escreva uma dica de planejamento de viagem muito útil, em português, com no máximo 3 frases, para o destino: ${trip.destination}.`;
-    
-    // 3. Pede para a IA gerar
-    const result = await model.generateContent(prompt);
-    const generatedTip = result.response.text();
+    try {
+      let generatedTip = "Organize bem seu roteiro e baixe os mapas offline antes de sair do hotel!";
 
-    // 4. Adiciona a dica gerada ao objeto da viagem
-    const tripWithAI = { ...trip, aiTip: generatedTip };
+      // Tenta gerar a dica com a IA se a chave estiver configurada
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (apiKey) {
+        try {
+          const genAI = new GoogleGenerativeAI(apiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const totalTravelers = trip.travelers.adults + trip.travelers.children + trip.travelers.seniors;
+          const prompt = `Atue como um guia de turismo local experiente. Escreva uma dica de planejamento de viagem muito útil e direta, em português, com no máximo 3 frases curtas. O destino é: ${trip.destination}. A viagem ocorrerá entre as datas: ${trip.startDate} e ${trip.endDate}. O grupo possui ${totalTravelers} pessoas (Adultos: ${trip.travelers.adults}, Crianças: ${trip.travelers.children}, Idosos: ${trip.travelers.seniors}). Foque em dicas práticas sobre clima, cultura local ou um conselho de ouro imperdível.`;
+          const result = await model.generateContent(prompt);
+          generatedTip = result.response.text().trim();
+        } catch (aiError) {
+          console.error("Falha ao gerar dica com IA (usando fallback):", aiError);
+        }
+      }
 
-    // 5. Salva no Firestore (já com a dica embutida!)
-    const tripRef = doc(db, 'trips', tripWithAI.id);
-    await setDoc(tripRef, tripWithAI);
-    
-  } catch (error) {
-    console.error("Erro ao gerar dica ou salvar:", error);
-    // Fallback: salva sem a dica caso falhe ou fique sem internet
-    const tripRef = doc(db, 'trips', trip.id);
-    await setDoc(tripRef, trip);
-  }
-},
+      // Adiciona a dica gerada ao objeto da viagem
+      const tripWithAI: Trip = { ...trip, aiTip: generatedTip };
+
+      const tripRef = doc(db, 'trips', tripWithAI.id);
+      await setDoc(tripRef, tripWithAI); // Salva na nuvem com a dica
+    } catch (error) {
+      console.error("Erro ao adicionar viagem:", error);
+    }
+  },
 
   updateTrip: async (id: string, updatedTrip: Partial<Trip>) => {
     try {

@@ -11,38 +11,44 @@ const Dashboard = () => {
   // --- ESTADOS DO MODAL DE NOVA VIAGEM ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [destination, setDestination] = useState('');
-  const [date, setDate] = useState('');
-  const [travelers, setTravelers] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [adults, setAdults] = useState(1); // Começa com pelo menos 1 adulto
+  const [children, setChildren] = useState(0);
+  const [seniors, setSeniors] = useState(0);
   const [secretCode, setSecretCode] = useState('');
+  const [needsFlight, setNeedsFlight] = useState(true);
+  const [needsHotel, setNeedsHotel] = useState(true);
 
   const handleCreateTrip = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!destination || !date || !secretCode) return;
-
-    // Converte a string de viajantes num array (ex: "João, Ana" -> ["João", "Ana"])
-    const travelersArray = travelers.split(',').map(t => t.trim()).filter(Boolean);
+    if (!destination || !startDate || !endDate || !secretCode) return;
 
     const newTrip: Trip = {
       id: crypto.randomUUID(),
       destination,
-      date,
-      travelers: travelersArray.length > 0 ? travelersArray : ['Eu'],
+      startDate,
+      endDate,
+      travelers: { adults, children, seniors },
       secretCode,
       expenses: [],
-      itinerary: []
+      itinerary: [],
+      flight: { needsFlight, isBooked: false },
+      hotel: { needsHotel, isBooked: false }
     };
 
     addTrip(newTrip);
     
-    // Limpa o formulário e fecha o modal
+    // Limpeza
     setDestination('');
-    setDate('');
-    setTravelers('');
+    setStartDate('');
+    setEndDate('');
+    setAdults(1);
+    setChildren(0);
+    setSeniors(0);
     setSecretCode('');
     setIsModalOpen(false);
 
-    // Redireciona o utilizador diretamente para o painel da nova viagem
     navigate(`/viagem/${newTrip.id}`);
   };
 
@@ -92,11 +98,12 @@ const Dashboard = () => {
               <div className="flex items-center space-x-4 mt-4 text-slate-500 text-sm">
                 <div className="flex items-center">
                   <Calendar size={16} className="mr-1" />
-                  {trip.date}
+                  {/* O "T00:00:00" evita problemas de fuso horário ao formatar datas nativas */}
+                  {new Date(trip.startDate + 'T00:00:00').toLocaleDateString('pt-BR')} 
                 </div>
                 <div className="flex items-center">
                   <Users size={16} className="mr-1" />
-                  {trip.travelers.join(' e ')}
+                  {trip.travelers.adults + trip.travelers.children + trip.travelers.seniors} pessoas
                 </div>
               </div>
             </div>
@@ -145,28 +152,57 @@ const Dashboard = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Quando?</label>
-                <input 
-                  type="text" 
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  placeholder="Ex: Dezembro 2026" 
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ida</label>
+                  <input 
+                    type="date" 
+                    required
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Volta</label>
+                  <input 
+                    type="date" 
+                    required
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Viajantes</label>
-                <input 
-                  type="text" 
-                  value={travelers}
-                  onChange={(e) => setTravelers(e.target.value)}
-                  placeholder="Ex: João, Ana" 
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium"
-                />
-                <p className="text-xs text-slate-400 mt-2 ml-1">Separe os nomes por vírgula.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Adultos</label>
+                    <input 
+                      type="number" min="0" required
+                      value={adults} onChange={(e) => setAdults(Number(e.target.value))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-center text-lg font-bold text-slate-800 focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Crianças</label>
+                    <input 
+                      type="number" min="0" required
+                      value={children} onChange={(e) => setChildren(Number(e.target.value))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-center text-lg font-bold text-slate-800 focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Idosos</label>
+                    <input 
+                      type="number" min="0" required
+                      value={seniors} onChange={(e) => setSeniors(Number(e.target.value))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-center text-lg font-bold text-slate-800 focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -182,6 +218,17 @@ const Dashboard = () => {
                   className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium tracking-widest"
                 />
                 <p className="text-xs text-slate-400 mt-2 ml-1">Você usará este código para acessar o app.</p>
+              </div>
+
+              <div className="flex space-x-4 mb-4">
+                <label className="flex items-center space-x-2 text-sm font-bold text-slate-700">
+                  <input type="checkbox" checked={needsFlight} onChange={(e) => setNeedsFlight(e.target.checked)} className="rounded text-primary focus:ring-primary" />
+                  <span>Precisa de Voo?</span>
+                </label>
+                <label className="flex items-center space-x-2 text-sm font-bold text-slate-700">
+                  <input type="checkbox" checked={needsHotel} onChange={(e) => setNeedsHotel(e.target.checked)} className="rounded text-primary focus:ring-primary" />
+                  <span>Precisa de Hotel?</span>
+                </label>
               </div>
 
               <button 
