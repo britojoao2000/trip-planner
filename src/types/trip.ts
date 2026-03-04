@@ -29,6 +29,31 @@ export interface Travelers {
   seniors: number;
 }
 
+export interface FlightLeg {
+  id: string;
+  direction: 'ida' | 'volta';
+  airline: string;
+  flightNumber: string;
+  fromAirport: string;
+  fromCity: string;
+  toAirport: string;
+  toCity: string;
+  departureDate: string;
+  departureTime: string;
+  arrivalDate: string;
+  arrivalTime: string;
+  seatType: 'Econômica' | 'Econômica Premium' | 'Executiva' | 'Primeira Classe';
+  pricePerPerson: number;
+  totalPrice: number;
+  baggageIncluded: boolean;
+  notes: string;
+  connections?: {
+    airport: string;
+    city: string;
+    duration: string;
+  }[];
+}
+
 export interface Trip {
   id: string;
   destination: string;
@@ -41,6 +66,7 @@ export interface Trip {
   aiTip?: string;
   flight: FlightDetails;
   hotel: HotelDetails;
+  flights?: FlightLeg[]; // <-- CONECTAMOS OS VOOS NA VIAGEM AQUI
 }
 
 export interface FlightDetails {

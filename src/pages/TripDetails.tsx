@@ -9,7 +9,7 @@ import {
   Star, ExternalLink, ImagePlus, Link, CheckCircle2, Circle,
   ArrowRight, PieChart
 } from 'lucide-react';
-import type { Expense, Activity } from '../types/trip';
+import type { Expense, Activity, FlightLeg } from '../types/trip';
 
 // ==========================================
 // TYPES
@@ -39,26 +39,6 @@ interface HotelInfo {
   isSelected?: boolean;   
 }
 
-interface FlightLeg {
-  id: string;
-  direction: 'ida' | 'volta';
-  airline: string;
-  flightNumber: string;
-  fromAirport: string;
-  fromCity: string;
-  toAirport: string;
-  toCity: string;
-  departureDate: string;
-  departureTime: string;
-  arrivalDate: string;
-  arrivalTime: string;
-  seatType: 'Econômica' | 'Econômica Premium' | 'Executiva' | 'Primeira Classe';
-  pricePerPerson: number;
-  totalPrice: number;
-  baggageIncluded: boolean;
-  notes: string;
-}
-
 const categoryIcons: Record<string, React.ElementType> = {
   'Voo': Plane,
   'Hospedagem': Hotel,
@@ -72,7 +52,7 @@ const categoryIcons: Record<string, React.ElementType> = {
 const TripDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { trips, updateTrip, deleteTrip, uploadHotelImage } = useTripStore();
+  const { trips, updateTrip, deleteTrip } = useTripStore();
   const EXCHANGE_RATE_CLP = 180;
   
   const trip = trips.find(t => t.id === id);
@@ -123,7 +103,8 @@ const TripDetails = () => {
     airline: '', flightNumber: '', fromAirport: '', fromCity: '',
     toAirport: '', toCity: '', departureDate: trip?.startDate || '', departureTime: '',
     arrivalDate: trip?.startDate || '', arrivalTime: '', seatType: 'Econômica',
-    pricePerPerson: 0, totalPrice: 0, baggageIncluded: false, notes: ''
+    pricePerPerson: 0, totalPrice: 0, baggageIncluded: false, notes: '',
+    connections: []
   });
 
   if (!trip) {
@@ -389,38 +370,74 @@ const TripDetails = () => {
     updateTrip(trip.id, { hotels: updatedHotels } as any);
   };
 
+  // Função Ninja: Comprime a imagem no próprio navegador
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800; // Tamanho máximo ideal para PWA
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          // Mantém a proporção da imagem
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          // Exporta como JPEG com 70% de qualidade (extremamente leve)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
+
   const handleHotelImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    setIsUploadingImage(true);
+
+    setIsUploadingImage(true); // Usamos o mesmo estado para mostrar "Enviando..." no botão
+
     try {
-      const uploadPromises = files.map(file => {
-        return new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = async () => {
-            try {
-              const base64 = reader.result as string;
-              const url = await uploadHotelImage(trip.id, hotelForm.id, base64);
-              resolve(url);
-            } catch (err) {
-              reject(err);
-            }
-          };
-          reader.onerror = () => reject(new Error("Erro ao ler arquivo local"));
-          reader.readAsDataURL(file);
-        });
-      });
-      const urls = await Promise.all(uploadPromises);
+      // Dispara a compressão para todas as fotos selecionadas
+      const compressPromises = files.map(file => compressImage(file));
+      
+      // Aguarda todas serem espremidas e transformadas em Base64 leves
+      const compressedBase64Urls = await Promise.all(compressPromises);
+
+      // Adiciona ao estado do formulário do hotel
       setHotelForm(prev => ({
         ...prev,
-        images: [...(prev.images || []), ...urls]
+        images: [...(prev.images || []), ...compressedBase64Urls]
       }));
     } catch (error) {
-      console.error("Erro no upload múltiplo:", error);
-      alert("Falha ao subir algumas fotos. Verifique sua conexão.");
+      console.error("Erro ao comprimir as fotos:", error);
+      alert("Ocorreu um erro ao processar as imagens. Tente novamente.");
     } finally {
       setIsUploadingImage(false);
     }
+    
     e.target.value = '';
   };
 
@@ -473,7 +490,8 @@ const TripDetails = () => {
         direction: 'ida', airline: '', flightNumber: '', fromAirport: '', fromCity: '',
         toAirport: '', toCity: '', departureDate: trip.startDate, departureTime: '',
         arrivalDate: trip.startDate, arrivalTime: '', seatType: 'Econômica',
-        pricePerPerson: 0, totalPrice: 0, baggageIncluded: false, notes: ''
+        pricePerPerson: 0, totalPrice: 0, baggageIncluded: false, notes: '',
+        connections: []
       });
     }
     setIsFlightModalOpen(true);
@@ -881,9 +899,30 @@ const TripDetails = () => {
                                   <p className="text-sm font-bold text-primary mt-1">{flight.departureTime}</p>
                                   <p className="text-xs text-slate-400">{flight.departureDate ? new Date(flight.departureDate + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</p>
                                 </div>
-                                <div className="flex flex-col items-center px-2">
-                                  <div className="w-16 h-px bg-slate-200 relative">
-                                    <Plane size={14} className="absolute -top-[7px] left-1/2 -translate-x-1/2 text-slate-400 rotate-90" />
+                                {/* INÍCIO DO VISUAL DA ROTA */}
+                                <div className="flex flex-col items-center px-2 flex-1 relative">
+                                  {/* A linha de fundo */}
+                                  <div className="w-full h-px bg-slate-200 absolute top-1/2 -translate-y-1/2 left-0 right-0 z-0"></div>
+                                  
+                                  <div className="relative z-10 w-full flex justify-center items-center">
+                                    {(!flight.connections || flight.connections.length === 0) ? (
+                                      // Voo Direto
+                                      <div className="bg-white px-2">
+                                        <Plane size={16} className="text-slate-400 rotate-90" />
+                                      </div>
+                                    ) : (
+                                      // Voo com Escalas
+                                      <div className="flex flex-col items-center bg-white px-2 mt-[-10px]">
+                                        <p className="text-[10px] font-bold text-amber-500 uppercase bg-amber-50 px-2 rounded-full mb-1 border border-amber-100">
+                                          {flight.connections.length} {flight.connections.length === 1 ? 'Escala' : 'Escalas'}
+                                        </p>
+                                        <div className="flex space-x-1">
+                                          {flight.connections.map((conn, idx) => (
+                                            <div key={idx} className="w-2 h-2 rounded-full bg-slate-300 border-2 border-white shadow-sm" title={`${conn.airport} - ${conn.duration}`}></div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="text-center">
@@ -912,6 +951,22 @@ const TripDetails = () => {
                               {flight.notes && (
                                 <div className="mt-3 bg-amber-50 rounded-xl p-3">
                                   <p className="text-xs text-amber-700">{flight.notes}</p>
+                                </div>
+                              )}
+                              {flight.connections && flight.connections.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-slate-50 space-y-1">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Detalhes das Escalas</p>
+                                  {flight.connections.map((conn, idx) => (
+                                    <div key={idx} className="flex justify-between items-center text-xs bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                        <div>
+                                          <span className="font-bold text-slate-700">{conn.airport}</span>
+                                          <span className="text-slate-500 ml-1">({conn.city})</span>
+                                        </div>
+                                        <div className="text-slate-500 flex items-center font-medium">
+                                          ⏱️ {conn.duration}
+                                        </div>
+                                    </div>
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -1415,7 +1470,7 @@ const TripDetails = () => {
                     : 'bg-emerald-600 text-white shadow-emerald-300 active:scale-95'
                 }`}
               >
-                {isUploadingImage ? 'Enviando fotos...' : 'Salvar Opção de Hotel'}
+                {isUploadingImage ? 'Processando fotos...' : 'Salvar Opção de Hotel'}
               </button>
             </form>
           </div>
@@ -1552,6 +1607,79 @@ const TripDetails = () => {
                   </div>
                 </div>
               </div>
+              {/* INÍCIO DO BLOCO DE CONEXÕES */}
+              <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Escalas / Conexões</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newConnections = [...(flightForm.connections || []), { airport: '', city: '', duration: '' }];
+                      setFlightForm(p => ({ ...p, connections: newConnections }));
+                    }}
+                    className="text-blue-600 font-bold text-[10px] uppercase bg-blue-100 px-2 py-1.5 rounded-lg active:scale-95"
+                  >
+                    + Adicionar Escala
+                  </button>
+                </div>
+
+                {(!flightForm.connections || flightForm.connections.length === 0) ? (
+                  <p className="text-[10px] text-slate-400 italic">Voo direto. Adicione escalas se houver.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {flightForm.connections.map((conn, index) => (
+                      <div key={index} className="flex flex-col bg-white p-3 rounded-2xl border border-slate-100 space-y-2">
+                         <div className="flex justify-between items-center mb-1">
+                           <span className="text-xs font-bold text-slate-500">Conexão {index + 1}</span>
+                           <button 
+                             type="button" 
+                             onClick={() => {
+                               const updatedConnections = flightForm.connections?.filter((_, i) => i !== index);
+                               setFlightForm(p => ({ ...p, connections: updatedConnections }));
+                             }}
+                             className="text-red-400 hover:text-red-600"
+                           >
+                             <X size={14} />
+                           </button>
+                         </div>
+                        <div className="flex space-x-2">
+                          <input
+                            type="text" required placeholder="Aeroporto (Ex: GRU)" maxLength={4}
+                            value={conn.airport}
+                            onChange={(e) => {
+                              const newConns = [...(flightForm.connections || [])];
+                              newConns[index].airport = e.target.value.toUpperCase();
+                              setFlightForm(p => ({ ...p, connections: newConns }));
+                            }}
+                            className="w-1/3 p-2 bg-slate-50 rounded-xl text-sm font-bold text-center focus:ring-2 focus:ring-blue-500"
+                          />
+                          <input
+                            type="text" required placeholder="Cidade"
+                            value={conn.city}
+                            onChange={(e) => {
+                              const newConns = [...(flightForm.connections || [])];
+                              newConns[index].city = e.target.value;
+                              setFlightForm(p => ({ ...p, connections: newConns }));
+                            }}
+                            className="w-1/3 p-2 bg-slate-50 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500"
+                          />
+                           <input
+                            type="text" required placeholder="Tempo (Ex: 2h 30m)"
+                            value={conn.duration}
+                            onChange={(e) => {
+                              const newConns = [...(flightForm.connections || [])];
+                              newConns[index].duration = e.target.value;
+                              setFlightForm(p => ({ ...p, connections: newConns }));
+                            }}
+                            className="w-1/3 p-2 bg-slate-50 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Assento</label>
