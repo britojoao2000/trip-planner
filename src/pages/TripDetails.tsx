@@ -6,7 +6,8 @@ import {
   Plus, Plane, Hotel, Car, Utensils, Shield, 
   Trash2, Wallet, Camera, Coffee, CircleDollarSign,
   Edit2, Map, X, BedDouble, Building2, Navigation,
-  Star, ExternalLink, ImagePlus, Link, CheckCircle2, Circle
+  Star, ExternalLink, ImagePlus, Link, CheckCircle2, Circle,
+  ArrowRight, PieChart
 } from 'lucide-react';
 import type { Expense, Activity } from '../types/trip';
 
@@ -33,9 +34,9 @@ interface HotelInfo {
   phone: string;
   notes: string;
   rooms: HotelRoom[];
-  images: string[];       // base64 data URLs
-  bookingUrl: string;     // link para reserva
-  isSelected?: boolean;   // Nova flag para definir se é a opção escolhida
+  images: string[];       
+  bookingUrl: string;     
+  isSelected?: boolean;   
 }
 
 interface FlightLeg {
@@ -95,7 +96,8 @@ const TripDetails = () => {
   const [activityCategory, setActivityCategory] = useState('Passeio');
   const [customCategory, setCustomCategory] = useState('');
   const [activityCost, setActivityCost] = useState('');
-
+  const [activitySubCosts, setActivitySubCosts] = useState<Array<{id: string, description: string, amount: string, currency: 'BRL'|'CLP'}>>([]);
+  
   // --- ESTADOS DO MODAL DE HOTEL ---
   const [isHotelModalOpen, setIsHotelModalOpen] = useState(false);
   const [editingHotelId, setEditingHotelId] = useState('');
@@ -139,10 +141,9 @@ const TripDetails = () => {
   const formattedStartDate = new Date(trip.startDate + 'T00:00:00').toLocaleDateString('pt-BR');
   const formattedEndDate = new Date(trip.endDate + 'T00:00:00').toLocaleDateString('pt-BR');
 
-  // Derived hotel/flight data from trip (stored as custom fields)
+  // Derived hotel/flight data from trip
   const hotels: HotelInfo[] = (trip as any).hotels || [];
   const flights: FlightLeg[] = (trip as any).flights || [];
-  
   const selectedHotel = hotels.find(h => h.isSelected) || null;
 
   // ==========================================
@@ -169,9 +170,7 @@ const TripDetails = () => {
   const totalFlights = flights.reduce((acc, f) => acc + f.totalPrice, 0);
   const totalSelectedHotel = selectedHotel ? calcHotelTotal(selectedHotel) : 0;
   
-  // O Grande Total soma as despesas manuais + os voos + o HOTEL SELECIONADO
   const grandTotal = totalManualExpenses + totalFlights + totalSelectedHotel;
-
   const formatCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
   // ==========================================
@@ -199,48 +198,94 @@ const TripDetails = () => {
   // ==========================================
   const handleAddActivity = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activityDesc || !selectedDayId || !activityStartTime) return;
-
-    const finalCategory = activityCategory === 'Outra' ? customCategory : activityCategory;
-    const costValue = activityCost ? parseFloat(activityCost.replace(',', '.')) : 0;
-
-    const newActivity: Activity = {
-      id: editingActivityId || crypto.randomUUID(),
-      description: activityDesc,
-      startTime: activityStartTime,
-      endTime: activityEndTime,
-      category: finalCategory,
-      cost: costValue > 0 ? costValue : undefined,
-    };
-
-    const safeItinerary = trip.itinerary || [];
-    const updatedItinerary = safeItinerary.map(day => {
-      if (day.id === selectedDayId) {
-        const safeActivities = day.activities || [];
-        if (editingActivityId) {
-          return { ...day, activities: safeActivities.map(a => a.id === editingActivityId ? newActivity : a) };
-        }
-        return { ...day, activities: [...safeActivities, newActivity] };
-      }
-      return day;
-    });
-
-    const safeExpenses = trip.expenses || [];
-    let updatedExpenses = safeExpenses;
-    if (!editingActivityId && costValue > 0) {
-      updatedExpenses = [...safeExpenses, {
-        id: crypto.randomUUID(),
-        category: finalCategory === 'Alimentação' ? 'Alimentação' : 'Passeio',
-        description: activityDesc,
-        amount: costValue,
-        currency: 'BRL'
-      }];
+    console.log("1. Iniciando handleAddActivity");
+    if (!activityDesc || !selectedDayId || !activityStartTime) {
+      console.log("Parou: campos obrigatórios vazios");
+      return;
     }
-
-    updateTrip(trip.id, { itinerary: updatedItinerary, expenses: updatedExpenses });
-    setActivityDesc(''); setActivityStartTime(''); setActivityEndTime('');
-    setActivityCategory('Passeio'); setCustomCategory(''); setActivityCost('');
-    setEditingActivityId(''); setIsActivityModalOpen(false);
+    
+    try {
+      const finalCategory = activityCategory === 'Outra' ? customCategory : activityCategory;
+      
+      let costString = String(activityCost || "0");
+      let costValue = parseFloat(costString.replace(',', '.')) || 0;
+      
+      console.log("2. Custo base calculado:", costValue);
+      
+      const processedSubCosts = activitySubCosts.map(sc => {
+        const safeAmountString = String(sc.amount || "0");
+        return {
+          ...sc,
+          amount: parseFloat(safeAmountString.replace(',', '.')) || 0
+        };
+      }).filter(sc => sc.amount > 0);
+      
+      console.log("3. Subcustos processados:", processedSubCosts);
+      
+      if (processedSubCosts.length > 0) {
+        costValue = processedSubCosts.reduce((acc, curr) => {
+          const valorReal = curr.currency === 'CLP' ? curr.amount / EXCHANGE_RATE_CLP : curr.amount; 
+          return acc + valorReal;
+        }, 0);
+        console.log("4. Novo valor total baseado nos subcustos:", costValue);
+      }
+      
+      const newActivity: any = {
+        id: editingActivityId || crypto.randomUUID(),
+        description: activityDesc,
+        startTime: activityStartTime,
+        endTime: activityEndTime,
+        category: finalCategory,
+      };
+      
+      if (costValue > 0) {
+        newActivity.cost = costValue;
+      }
+      
+      if (processedSubCosts && processedSubCosts.length > 0) {
+        newActivity.subCosts = processedSubCosts;
+      }
+      console.log("5. Atividade montada:", newActivity);
+      
+      const safeItinerary = trip.itinerary || [];
+      const updatedItinerary = safeItinerary.map(day => {
+        if (day.id === selectedDayId) {
+          const safeActivities = day.activities || [];
+          if (editingActivityId) {
+            return { ...day, activities: safeActivities.map(a => a.id === editingActivityId ? newActivity : a) };
+          }
+          return { ...day, activities: [...safeActivities, newActivity] };
+        }
+        return day;
+      });
+      
+      const safeExpenses = trip.expenses || [];
+      let updatedExpenses = safeExpenses;
+      
+      if (!editingActivityId && costValue > 0) {
+        updatedExpenses = [...safeExpenses, {
+          id: crypto.randomUUID(),
+          category: finalCategory === 'Alimentação' ? 'Alimentação' : 'Passeio',
+          description: activityDesc,
+          amount: costValue,
+          currency: 'BRL' 
+        }];
+        console.log("6. Nova despesa gerada para a atividade");
+      }
+      
+      console.log("7. Enviando para o Firebase...");
+      updateTrip(trip.id, { itinerary: updatedItinerary, expenses: updatedExpenses });
+      
+      setActivityDesc(''); setActivityStartTime(''); setActivityEndTime('');
+      setActivityCategory('Passeio'); setCustomCategory(''); setActivityCost('');
+      setEditingActivityId(''); 
+      setActivitySubCosts([]); 
+      setIsActivityModalOpen(false);
+      
+      console.log("8. Sucesso! Modal fechado.");
+    } catch (error) {
+      console.error("Erro ao salvar atividade:", error);
+    }
   };
 
   const handleOpenEditActivity = (dayId: string, activity: Activity) => {
@@ -248,6 +293,12 @@ const TripDetails = () => {
     setActivityDesc(activity.description); setActivityStartTime(activity.startTime);
     setActivityEndTime(activity.endTime || '');
     setActivityCost(activity.cost ? activity.cost.toString().replace('.', ',') : '');
+    setActivitySubCosts(
+      activity.subCosts 
+        ? activity.subCosts.map(sc => ({...sc, amount: sc.amount.toString().replace('.', ',')})) 
+        : []
+    );
+    
     const defaultCategories = ['Passeio', 'Alimentação', 'Transporte', 'Lazer'];
     if (defaultCategories.includes(activity.category)) {
       setActivityCategory(activity.category); setCustomCategory('');
@@ -313,10 +364,8 @@ const TripDetails = () => {
     e.preventDefault();
     let updatedHotels: HotelInfo[];
     
-    // Se for o primeiro hotel sendo adicionado, já marca como selecionado por padrão
     const isFirstHotel = hotels.length === 0 && !editingHotelId;
     const finalHotelForm = { ...hotelForm, isSelected: isFirstHotel ? true : hotelForm.isSelected };
-
     if (editingHotelId) {
       updatedHotels = hotels.map(h => h.id === editingHotelId ? finalHotelForm : h);
     } else {
@@ -335,7 +384,6 @@ const TripDetails = () => {
   const handleSelectHotel = (hotelId: string) => {
     const updatedHotels = hotels.map(h => ({
       ...h,
-      // Se clicar no já selecionado, ele pode deselecionar (ficando sem hotel). Senão, seleciona apenas ele.
       isSelected: h.id === hotelId ? !h.isSelected : false 
     }));
     updateTrip(trip.id, { hotels: updatedHotels } as any);
@@ -344,44 +392,35 @@ const TripDetails = () => {
   const handleHotelImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-
     setIsUploadingImage(true);
-
     try {
       const uploadPromises = files.map(file => {
         return new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
-          
           reader.onload = async () => {
             try {
               const base64 = reader.result as string;
-              // O hotelForm.id já é gerado ao abrir o modal, então é seguro usá-lo aqui
               const url = await uploadHotelImage(trip.id, hotelForm.id, base64);
               resolve(url);
             } catch (err) {
               reject(err);
             }
           };
-          
           reader.onerror = () => reject(new Error("Erro ao ler arquivo local"));
           reader.readAsDataURL(file);
         });
       });
-
-      // Aguarda TODAS as fotos subirem para o Storage
       const urls = await Promise.all(uploadPromises);
-
       setHotelForm(prev => ({
         ...prev,
         images: [...(prev.images || []), ...urls]
       }));
     } catch (error) {
       console.error("Erro no upload múltiplo:", error);
-      alert("Falha ao subir algumas fotos. Verifique sua conexão e o Storage do Firebase.");
+      alert("Falha ao subir algumas fotos. Verifique sua conexão.");
     } finally {
       setIsUploadingImage(false);
     }
-    
     e.target.value = '';
   };
 
@@ -473,15 +512,22 @@ const TripDetails = () => {
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       {/* Header Fixo */}
-      <header className="bg-white px-6 py-6 shadow-sm sticky top-0 z-30 flex items-center">
-        <button onClick={() => navigate('/')} className="p-2 -ml-2 mr-3 text-slate-400 active:scale-95">
-          <ArrowLeft size={24} />
-        </button>
-        <div>
-          <h1 className="text-xl font-black text-slate-800 leading-tight">{trip.destination}</h1>
-          <p className="text-xs font-bold text-primary mt-1 flex items-center">
-            <MapPin size={12} className="mr-1" /> Roteiro Ativo
-          </p>
+      <header className="bg-white px-6 py-4 shadow-sm sticky top-0 z-30 flex items-center justify-between">
+        <div className="flex items-center">
+          <button onClick={() => navigate('/')} className="p-2 -ml-2 mr-3 text-slate-400 active:scale-95">
+            <ArrowLeft size={24} />
+          </button>
+          <div>
+            <h1 className="text-xl font-black text-slate-800 leading-tight">{trip.destination}</h1>
+            <p className="text-xs font-bold text-primary mt-1 flex items-center">
+              <MapPin size={12} className="mr-1" /> Roteiro Ativo
+            </p>
+          </div>
+        </div>
+        
+        <div className="text-right bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100 shadow-sm">
+          <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Total da Viagem</p>
+          <p className="font-black text-emerald-800 text-sm">{formatCurrency(grandTotal)}</p>
         </div>
       </header>
 
@@ -503,7 +549,6 @@ const TripDetails = () => {
       </nav>
 
       <main className="p-6">
-
         {/* ABA: RESUMO */}
         {activeTab === 'resumo' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-2 duration-300">
@@ -518,6 +563,26 @@ const TripDetails = () => {
                 <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Viajantes</p>
                 <p className="font-bold text-slate-800">{totalTravelers} Pessoas</p>
                 <p className="text-xs text-slate-400 mt-1">{trip.travelers.adults}A • {trip.travelers.children}C • {trip.travelers.seniors}I</p>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-secondary to-emerald-600 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden mt-6 mb-2">
+              <Wallet size={120} className="absolute -right-6 -bottom-6 opacity-10" />
+              <div className="relative z-10">
+                <p className="text-emerald-100 text-sm font-medium">Custo Atualizado</p>
+                <h2 className="text-4xl font-black mt-1">{formatCurrency(grandTotal)}</h2>
+                <div className="flex items-center justify-between pt-4 mt-4 border-t border-emerald-500/30">
+                  <div>
+                    <p className="text-xs text-emerald-100">Por Viajante ({totalTravelers}x)</p>
+                    <p className="text-lg font-bold">{formatCurrency(grandTotal / (totalTravelers || 1))}</p>
+                  </div>
+                  <button 
+                    onClick={() => setActiveTab('orcamento')} 
+                    className="bg-white/20 hover:bg-white/30 active:scale-95 px-4 py-2 rounded-xl backdrop-blur-sm text-sm font-bold transition-all flex items-center shadow-sm"
+                  >
+                    Ver Gráficos <ArrowRight size={16} className="ml-1" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -590,7 +655,6 @@ const TripDetails = () => {
             </div>
             
             <p className="text-sm text-slate-500 mb-4">Você pode cadastrar várias opções e marcar qual foi a escolhida final.</p>
-
             {hotels.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 border-dashed">
                 <Building2 className="mx-auto text-slate-300 mb-4" size={56} />
@@ -609,8 +673,6 @@ const TripDetails = () => {
                   
                   return (
                     <div key={hotel.id} className={`bg-white rounded-3xl shadow-sm border-2 overflow-hidden transition-all ${isSelected ? 'border-emerald-500 shadow-emerald-100' : 'border-slate-100'}`}>
-                      
-                      {/* Checkbox de Seleção */}
                       <div 
                         onClick={() => handleSelectHotel(hotel.id)}
                         className={`p-4 flex items-center cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50' : 'bg-slate-50 hover:bg-slate-100'}`}
@@ -627,7 +689,6 @@ const TripDetails = () => {
                           {isSelected && <p className="text-xs text-emerald-600">Este valor está contabilizado no orçamento final.</p>}
                         </div>
                       </div>
-
                       <div className="p-6">
                         <div className="flex justify-between items-start mb-2">
                           <h3 className="text-2xl font-black text-slate-800 leading-tight pr-4">{hotel.name}</h3>
@@ -640,8 +701,7 @@ const TripDetails = () => {
                             </button>
                           </div>
                         </div>
-
-                        {/* Estrelas */}
+                        
                         <div className="flex mb-4">
                           {Array.from({ length: hotel.stars }).map((_, i) => (
                             <Star key={i} size={14} className="text-amber-400 fill-amber-400" />
@@ -653,7 +713,6 @@ const TripDetails = () => {
                             <Navigation size={14} className="mr-1.5 mt-0.5 shrink-0" /> {hotel.address}
                           </p>
                         )}
-
                         <div className="grid grid-cols-3 gap-3 pt-4 border-t border-slate-100 mb-5">
                           <div>
                             <p className="text-xs text-slate-400 mb-1">Check-in</p>
@@ -672,8 +731,7 @@ const TripDetails = () => {
                             <p className="text-xs text-slate-500">{hotel.checkOutTime}</p>
                           </div>
                         </div>
-
-                        {/* Total do Hotel */}
+                        
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex justify-between items-center mb-5">
                           <div>
                             <p className="text-xs text-slate-500 mb-0.5">Custo Total (Opção)</p>
@@ -684,8 +742,7 @@ const TripDetails = () => {
                             <p className="font-bold text-slate-700">{formatCurrency(total / (totalTravelers || 1))}</p>
                           </div>
                         </div>
-
-                        {/* Link de reserva */}
+                        
                         {hotel.bookingUrl && (
                           <a
                             href={hotel.bookingUrl.startsWith('http') ? hotel.bookingUrl : `https://${hotel.bookingUrl}`}
@@ -700,8 +757,7 @@ const TripDetails = () => {
                             <ExternalLink size={16} className="text-blue-400" />
                           </a>
                         )}
-
-                        {/* Galeria de Fotos */}
+                        
                         {(hotel.images || []).length > 0 && (
                           <div className="mb-5">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Fotos</p>
@@ -714,8 +770,7 @@ const TripDetails = () => {
                             </div>
                           </div>
                         )}
-
-                        {/* Quartos Restritos ao Cartão */}
+                        
                         <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
                           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Quartos Configurados</p>
                           {(hotel.rooms || []).length === 0 ? (
@@ -737,14 +792,12 @@ const TripDetails = () => {
                           )}
                         </div>
                         
-                        {/* Notas */}
                         {hotel.notes && (
                           <div className="mt-5 bg-amber-50 border border-amber-100 p-4 rounded-2xl">
                             <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-1">Observações</p>
                             <p className="text-sm text-amber-900">{hotel.notes}</p>
                           </div>
                         )}
-                        
                       </div>
                     </div>
                   );
@@ -766,7 +819,6 @@ const TripDetails = () => {
                 <Plus size={18} className="mr-1" /> Novo Voo
               </button>
             </div>
-
             {flights.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 border-dashed">
                 <Plane className="mx-auto text-slate-300 mb-4" size={56} />
@@ -790,7 +842,6 @@ const TripDetails = () => {
                     </div>
                   </div>
                 )}
-
                 {/* Lista de voos */}
                 {['ida', 'volta'].map(dir => {
                   const group = flights.filter(f => f.direction === dir);
@@ -884,7 +935,6 @@ const TripDetails = () => {
                 <Plus size={18} className="mr-1" /> Novo Dia
               </button>
             </div>
-
             {(!trip.itinerary || trip.itinerary.length === 0) ? (
               <div className="text-center py-12 bg-white rounded-3xl border border-slate-200 border-dashed">
                 <Map className="mx-auto text-slate-300 mb-4" size={48} />
@@ -918,12 +968,34 @@ const TripDetails = () => {
                                 </div>
                               </div>
                               <p className="text-slate-800 font-bold leading-relaxed">{activity.description}</p>
-                              {activity.cost && (
+                              {activity.subCosts && activity.subCosts.length > 0 ? (
+                                <div className="mt-3 bg-white border border-slate-100 rounded-xl p-3 shadow-sm">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                                    <CircleDollarSign size={12} className="mr-1" /> Detalhamento de Custos
+                                  </p>
+                                  <div className="space-y-1.5">
+                                    {activity.subCosts.map(sc => (
+                                      <div key={sc.id} className="flex justify-between text-sm">
+                                        <span className="text-slate-600 font-medium text-xs">• {sc.description}</span>
+                                        <span className="font-bold text-slate-800 text-xs">
+                                          {sc.currency === 'CLP' 
+                                            ? `CLP ${new Intl.NumberFormat('es-CL').format(sc.amount)}` 
+                                            : formatCurrency(sc.amount)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="mt-2 pt-2 border-t border-slate-50 flex justify-between items-center">
+                                    <span className="text-xs font-bold text-slate-500">Custo Total (Aprox.)</span>
+                                    <span className="text-sm font-black text-emerald-600">{formatCurrency(activity.cost || 0)}</span>
+                                  </div>
+                                </div>
+                              ) : activity.cost ? (
                                 <div className="mt-3 flex items-center text-sm font-bold text-emerald-600 bg-emerald-50 w-max px-3 py-1 rounded-lg">
                                   <CircleDollarSign size={14} className="mr-1" />
                                   {formatCurrency(activity.cost)}
                                 </div>
-                              )}
+                              ) : null}
                             </li>
                           ))}
                         </ul>
@@ -998,68 +1070,78 @@ const TripDetails = () => {
         {/* ABA: ORÇAMENTO FINAL (GRAND TOTAL) */}
         {activeTab === 'orcamento' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-2 duration-300">
-            <div className="bg-gradient-to-br from-secondary to-emerald-600 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden">
-              <Wallet size={120} className="absolute -right-6 -bottom-6 opacity-10" />
-              <div className="relative z-10">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <p className="text-emerald-100 text-sm font-medium">Custo Total da Viagem</p>
-                    <h2 className="text-4xl font-black mt-1">{formatCurrency(grandTotal)}</h2>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between pt-4 border-t border-emerald-500/30">
-                  <div>
-                    <p className="text-xs text-emerald-100">Custo por Viajante</p>
-                    <p className="text-lg font-bold">{formatCurrency(grandTotal / (totalTravelers || 1))}</p>
-                  </div>
-                  <div className="bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-                    <span className="text-xs font-bold">{totalTravelers} pessoas</span>
-                  </div>
-                </div>
-              </div>
+            <div className="flex items-center mb-2">
+              <PieChart className="text-secondary mr-2" size={28} />
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight">Análise de Custos</h2>
             </div>
-
-            {/* Agregação de Categorias incluindo Voos e Hotel Selecionado */}
+            
+            <p className="text-slate-500 text-sm mb-6">Veja para onde está indo o dinheiro do seu roteiro.</p>
             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider">Gastos por Categoria</h3>
+              <h3 className="text-sm font-bold text-slate-800 mb-6 uppercase tracking-wider">Distribuição Financeira</h3>
+              
               <div className="space-y-5">
                 {(() => {
                   const categoryTotals: Record<string, number> = {};
                   Object.keys(categoryIcons).forEach(cat => categoryTotals[cat] = 0);
                   
-                  // Despesas Manuais
                   trip.expenses.forEach(e => {
-                    if (categoryTotals[e.category] !== undefined) categoryTotals[e.category] += e.amount;
-                    else categoryTotals['Outro'] = (categoryTotals['Outro'] || 0) + e.amount;
+                    const currency = (e as any).currency || 'BRL';
+                    const valorEmReal = currency === 'CLP' ? e.amount / 180 : e.amount;
+                    if (categoryTotals[e.category] !== undefined) categoryTotals[e.category] += valorEmReal;
+                    else categoryTotals['Outro'] = (categoryTotals['Outro'] || 0) + valorEmReal;
                   });
                   
-                  // Injeção de Voo e Hotel Selecionado
                   categoryTotals['Voo'] += totalFlights;
                   categoryTotals['Hospedagem'] += totalSelectedHotel;
-
-                  return Object.entries(categoryTotals)
+                  const data = Object.entries(categoryTotals)
                     .filter(([_, amount]) => amount > 0)
-                    .sort(([, a], [, b]) => b - a)
-                    .map(([category, amount]) => {
-                      const percentage = ((amount / grandTotal) * 100).toFixed(0);
-                      return (
-                        <div key={category}>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="font-medium text-slate-600">
-                              {category} {category === 'Hospedagem' && <span className="text-[10px] text-emerald-500 bg-emerald-50 px-1 py-0.5 rounded">(Seleção)</span>}
-                            </span>
-                            <span className="font-bold text-slate-800">{formatCurrency(amount)}</span>
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-2">
-                            <div className="bg-secondary h-2 rounded-full" style={{ width: `${percentage}%` }}></div>
-                          </div>
+                    .sort(([, a], [, b]) => b - a);
+                  
+                  const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-amber-500', 'bg-purple-500', 'bg-rose-500', 'bg-cyan-500', 'bg-slate-500'];
+                  
+                  return (
+                    <>
+                      {grandTotal > 0 && (
+                        <div className="w-full h-4 flex rounded-full overflow-hidden mb-8 shadow-inner">
+                          {data.map(([category, amount], idx) => {
+                            const percentage = ((amount / grandTotal) * 100);
+                            return (
+                              <div 
+                                key={category} 
+                                style={{ width: `${percentage}%` }} 
+                                className={`${colors[idx % colors.length]} h-full border-r border-white/20 last:border-0 transition-all`}
+                                title={`${category}: ${percentage.toFixed(1)}%`}
+                              />
+                            );
+                          })}
                         </div>
-                      );
-                    });
+                      )}
+                      {data.map(([category, amount], idx) => {
+                        const percentage = ((amount / grandTotal) * 100).toFixed(1);
+                        return (
+                          <div key={category} className="flex items-center justify-between group">
+                            <div className="flex items-center w-1/2">
+                              <div className={`w-3 h-3 rounded-full mr-3 ${colors[idx % colors.length]}`}></div>
+                              <span className="font-bold text-slate-700 text-sm truncate">
+                                {category} {category === 'Hospedagem' && <span className="text-[10px] text-emerald-500 font-normal ml-1">(Selecionado)</span>}
+                              </span>
+                            </div>
+                            
+                            <div className="flex flex-col items-end w-1/2">
+                              <span className="font-black text-slate-800">{formatCurrency(amount)}</span>
+                              <span className="text-xs text-slate-400 font-medium">{percentage}% do total</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
                 })()}
                 
                 {grandTotal === 0 && (
-                  <p className="text-sm text-slate-400 text-center py-4">Nenhum gasto contabilizado ainda.</p>
+                  <div className="text-center py-8">
+                    <p className="text-sm text-slate-400">Nenhum gasto contabilizado ainda.</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -1114,27 +1196,19 @@ const TripDetails = () => {
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">O que vamos fazer?</label>
                 <input type="text" required autoFocus value={activityDesc} onChange={(e) => setActivityDesc(e.target.value)} placeholder="Ex: Pôr do sol no Valle de la Luna" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium" />
               </div>
+
+              {/* CORREÇÃO: Os campos de Horário que estavam faltando foram adicionados aqui */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Valor</label>
-                  <div className="flex space-x-2">
-                    <select 
-                      value={expenseCurrency} 
-                      onChange={(e) => setExpenseCurrency(e.target.value as 'BRL' | 'CLP')} 
-                      className="p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold w-24"
-                    >
-                      <option value="BRL">R$</option>
-                      <option value="CLP">CLP</option>
-                    </select>
-                    <input 
-                      type="number" step="0.01" required inputMode="decimal" 
-                      value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} 
-                      placeholder="0,00" 
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" 
-                    />
-                  </div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Horário de Início *</label>
+                  <input type="time" required value={activityStartTime} onChange={(e) => setActivityStartTime(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Horário de Fim</label>
+                  <input type="time" value={activityEndTime} onChange={(e) => setActivityEndTime(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" />
                 </div>
               </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Categoria</label>
                 <select value={activityCategory} onChange={(e) => setActivityCategory(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium appearance-none">
@@ -1148,10 +1222,55 @@ const TripDetails = () => {
                   <input type="text" required placeholder="Digite a categoria" value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} className="w-full mt-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-medium animate-in fade-in" />
                 )}
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Custo (Opcional)</label>
-                <input type="number" step="0.01" inputMode="decimal" value={activityCost} onChange={(e) => setActivityCost(e.target.value)} placeholder="R$ 0,00" className="w-full p-4 bg-emerald-50 border border-emerald-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 text-emerald-900 font-bold placeholder:text-emerald-300" />
-                {!editingActivityId && <p className="text-[10px] text-slate-400 mt-2 font-medium">Se preenchido, será adicionado aos Custos Manuais automaticamente.</p>}
+
+              <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200 transition-all">
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Custos do Passeio</label>
+                  <button 
+                    type="button" 
+                    onClick={() => setActivitySubCosts([...activitySubCosts, { id: crypto.randomUUID(), description: '', amount: '', currency: 'CLP' }])} 
+                    className="text-emerald-600 font-bold text-[10px] uppercase bg-emerald-100 px-2 py-1.5 rounded-lg active:scale-95"
+                  >
+                    + Detalhar Subitem
+                  </button>
+                </div>
+                {activitySubCosts.length === 0 ? (
+                  <div>
+                    <input type="number" step="0.01" inputMode="decimal" value={activityCost} onChange={(e) => setActivityCost(e.target.value)} placeholder="Valor total (R$ 0,00)" className="w-full p-4 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 text-emerald-900 font-bold" />
+                    {!editingActivityId && <p className="text-[10px] text-slate-400 mt-2 font-medium">Se preenchido, será adicionado aos Custos Manuais automaticamente.</p>}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {activitySubCosts.map((sc, index) => (
+                      <div key={sc.id} className="flex space-x-2 items-start bg-white p-2 rounded-2xl border border-slate-100">
+                        <input 
+                          type="text" required placeholder="Ex: Ingresso" 
+                          value={sc.description} 
+                          onChange={(e) => setActivitySubCosts(prev => prev.map((item, i) => i === index ? { ...item, description: e.target.value } : item))} 
+                          className="w-1/2 p-3 bg-slate-50 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500" 
+                        />
+                        <select 
+                          value={sc.currency} 
+                          onChange={(e) => setActivitySubCosts(prev => prev.map((item, i) => i === index ? { ...item, currency: e.target.value as 'BRL'|'CLP' } : item))} 
+                          className="w-1/4 p-3 bg-slate-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500 appearance-none"
+                        >
+                          <option value="BRL">R$</option>
+                          <option value="CLP">CLP</option>
+                        </select>
+                        <input 
+                          type="number" step="0.01" required placeholder="0,00" 
+                          value={sc.amount} 
+                          onChange={(e) => setActivitySubCosts(prev => prev.map((item, i) => i === index ? { ...item, amount: e.target.value } : item))} 
+                          className="w-1/4 p-3 bg-slate-50 rounded-xl text-sm font-bold focus:ring-2 focus:ring-emerald-500" 
+                        />
+                        <button type="button" onClick={() => setActivitySubCosts(prev => prev.filter((_, i) => i !== index))} className="p-3 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl">
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-slate-400 font-medium px-2 mt-2">O valor total será calculado e convertido automaticamente para R$.</p>
+                  </div>
+                )}
               </div>
               <button type="submit" className="w-full bg-primary hover:bg-blue-600 text-white font-bold text-lg py-4 rounded-2xl mt-4 shadow-lg shadow-primary/30 active:scale-95 transition-transform">
                 {editingActivityId ? 'Salvar Alterações' : 'Adicionar ao Roteiro'}
@@ -1219,8 +1338,7 @@ const TripDetails = () => {
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Observações</label>
                 <textarea value={hotelForm.notes} onChange={e => setHotelForm(p => ({...p, notes: e.target.value}))} placeholder="Ex: Café da manhã incluso, estacionamento gratuito..." rows={3} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-emerald-500/50 text-slate-800 font-medium resize-none" />
               </div>
-
-              {/* Link de Reserva */}
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Link da Reserva</label>
                 <div className="relative">
@@ -1235,8 +1353,7 @@ const TripDetails = () => {
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Cole aqui o link do Booking, Airbnb, Decolar, etc.</p>
               </div>
-
-              {/* Upload de Fotos */}
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fotos do Hotel</label>
                 <label className="flex flex-col items-center justify-center w-full py-5 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 transition-colors">
@@ -1262,8 +1379,7 @@ const TripDetails = () => {
                   </div>
                 )}
               </div>
-
-              {/* Quartos dentro do modal */}
+              
               <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
                 <div className="flex justify-between items-center mb-3">
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Quartos nesta opção</label>
@@ -1290,7 +1406,6 @@ const TripDetails = () => {
                   </div>
                 )}
               </div>
-
               <button 
                 type="submit" 
                 disabled={isUploadingImage}
@@ -1368,7 +1483,6 @@ const TripDetails = () => {
               <button onClick={() => setIsFlightModalOpen(false)} className="p-2 bg-slate-100 text-slate-500 rounded-full"><X size={20} /></button>
             </div>
             <form onSubmit={handleSaveFlight} className="space-y-5 pb-8">
-              {/* Sentido */}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sentido</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -1379,8 +1493,7 @@ const TripDetails = () => {
                   ))}
                 </div>
               </div>
-
-              {/* Companhia e Número do Voo */}
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Companhia Aérea *</label>
@@ -1391,8 +1504,7 @@ const TripDetails = () => {
                   <input type="text" value={flightForm.flightNumber} onChange={e => setFlightForm(p => ({...p, flightNumber: e.target.value}))} placeholder="Ex: LA3042" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500/50 text-slate-800 font-medium" />
                 </div>
               </div>
-
-              {/* Origem */}
+              
               <div className="bg-slate-50 rounded-3xl p-4 space-y-3">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">🛫 Origem</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -1416,8 +1528,7 @@ const TripDetails = () => {
                   </div>
                 </div>
               </div>
-
-              {/* Destino */}
+              
               <div className="bg-blue-50 rounded-3xl p-4 space-y-3">
                 <p className="text-xs font-bold text-blue-400 uppercase tracking-wider">🛬 Destino</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -1441,8 +1552,7 @@ const TripDetails = () => {
                   </div>
                 </div>
               </div>
-
-              {/* Classe / Assento */}
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Assento</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1457,8 +1567,7 @@ const TripDetails = () => {
                   ))}
                 </div>
               </div>
-
-              {/* Preços */}
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Valor por Pessoa</label>
@@ -1469,21 +1578,18 @@ const TripDetails = () => {
                   <input type="number" step="0.01" min="0" value={flightForm.totalPrice || ''} onChange={e => setFlightForm(p => ({...p, totalPrice: parseFloat(e.target.value) || 0}))} placeholder="0,00" className="w-full p-4 bg-emerald-50 border border-emerald-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 text-emerald-900 font-bold placeholder:text-emerald-300" />
                 </div>
               </div>
-
-              {/* Bagagem */}
+              
               <div>
                 <button type="button" onClick={() => setFlightForm(p => ({...p, baggageIncluded: !p.baggageIncluded}))} className={`w-full py-4 rounded-2xl font-bold text-sm transition-all flex items-center justify-center ${flightForm.baggageIncluded ? 'bg-emerald-100 text-emerald-700 border-2 border-emerald-300' : 'bg-slate-100 text-slate-500 border-2 border-transparent'}`}>
                   <span className="mr-2 text-lg">{flightForm.baggageIncluded ? '✅' : '🧳'}</span>
                   {flightForm.baggageIncluded ? 'Bagagem Incluída' : 'Sem Bagagem Despachada'}
                 </button>
               </div>
-
-              {/* Notas */}
+              
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Observações</label>
                 <textarea value={flightForm.notes} onChange={e => setFlightForm(p => ({...p, notes: e.target.value}))} placeholder="Ex: Escala em Buenos Aires, assentos 14A e 14B..." rows={2} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500/50 text-slate-800 font-medium resize-none" />
               </div>
-
               <button type="submit" className="w-full bg-blue-600 text-white font-bold text-lg py-4 rounded-2xl shadow-lg shadow-blue-300 active:scale-95 transition-transform">
                 {editingFlightId ? 'Salvar Alterações' : 'Adicionar Voo'}
               </button>

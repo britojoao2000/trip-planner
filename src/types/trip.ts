@@ -14,6 +14,7 @@ export interface Activity {
   endTime?: string;
   category: string;
   cost?: number;
+  subCosts?: { id: string; description: string; amount: number; currency: 'BRL' | 'CLP' }[];
 }
 
 export interface ItineraryItem {
