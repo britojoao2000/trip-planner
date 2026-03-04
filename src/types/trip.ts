@@ -3,6 +3,8 @@ export interface Expense {
   category: 'Voo' | 'Hospedagem' | 'Transfer' | 'Passeio' | 'Alimentação' | 'Seguro' | 'Outro';
   description: string;
   amount: number;
+  currency: 'BRL' | 'CLP' | 'USD';
+  exchangeRate?: number;
 }
 
 export interface Activity {

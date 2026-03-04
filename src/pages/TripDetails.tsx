@@ -71,16 +71,19 @@ const categoryIcons: Record<string, React.ElementType> = {
 const TripDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { trips, updateTrip, deleteTrip } = useTripStore();
+  const { trips, updateTrip, deleteTrip, uploadHotelImage } = useTripStore();
+  const EXCHANGE_RATE_CLP = 180;
   
   const trip = trips.find(t => t.id === id);
   const [activeTab, setActiveTab] = useState<'resumo' | 'itinerario' | 'custos' | 'orcamento' | 'hotel' | 'voo'>('resumo');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // --- ESTADOS DO MODAL DE CUSTOS ---
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [expenseDesc, setExpenseDesc] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseCategory, setExpenseCategory] = useState<Expense['category']>('Alimentação');
+  const [expenseCurrency, setExpenseCurrency] = useState<'BRL' | 'CLP'>('BRL');
 
   // --- ESTADOS DO MODAL DE ITINERÁRIO ---
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
@@ -157,7 +160,12 @@ const TripDetails = () => {
     return (hotel.rooms || []).reduce((acc, r) => acc + r.pricePerNight * r.quantity * nights, 0);
   };
 
-  const totalManualExpenses = trip.expenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const totalManualExpenses = trip.expenses.reduce((acc, curr) => {
+    const currency = (curr as any).currency || 'BRL';
+    const valorEmReal = currency === 'CLP' ? curr.amount / EXCHANGE_RATE_CLP : curr.amount;
+    return acc + valorEmReal;
+  }, 0);
+
   const totalFlights = flights.reduce((acc, f) => acc + f.totalPrice, 0);
   const totalSelectedHotel = selectedHotel ? calcHotelTotal(selectedHotel) : 0;
   
@@ -224,7 +232,8 @@ const TripDetails = () => {
         id: crypto.randomUUID(),
         category: finalCategory === 'Alimentação' ? 'Alimentação' : 'Passeio',
         description: activityDesc,
-        amount: costValue
+        amount: costValue,
+        currency: 'BRL'
       }];
     }
 
@@ -267,11 +276,17 @@ const TripDetails = () => {
     e.preventDefault();
     if (!expenseDesc || !expenseAmount) return;
     const newExpense: Expense = {
-      id: crypto.randomUUID(), category: expenseCategory,
-      description: expenseDesc, amount: parseFloat(expenseAmount.replace(',', '.'))
-    };
+      id: crypto.randomUUID(), 
+      category: expenseCategory,
+      description: expenseDesc, 
+      amount: parseFloat(expenseAmount.replace(',', '.')),
+      currency: expenseCurrency
+    } as Expense;
+    
     updateTrip(trip.id, { expenses: [...(trip.expenses || []), newExpense] });
-    setExpenseDesc(''); setExpenseAmount(''); setIsExpenseModalOpen(false);
+    setExpenseDesc(''); setExpenseAmount(''); 
+    setExpenseCurrency('BRL');
+    setIsExpenseModalOpen(false);
   };
 
   const handleDeleteExpense = (expenseId: string) => {
@@ -326,19 +341,47 @@ const TripDetails = () => {
     updateTrip(trip.id, { hotels: updatedHotels } as any);
   };
 
-  const handleHotelImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHotelImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setHotelForm(prev => ({
-          ...prev,
-          images: [...(prev.images || []), reader.result as string]
-        }));
-      };
-      reader.readAsDataURL(file);
-    });
+
+    setIsUploadingImage(true);
+
+    try {
+      const uploadPromises = files.map(file => {
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          
+          reader.onload = async () => {
+            try {
+              const base64 = reader.result as string;
+              // O hotelForm.id já é gerado ao abrir o modal, então é seguro usá-lo aqui
+              const url = await uploadHotelImage(trip.id, hotelForm.id, base64);
+              resolve(url);
+            } catch (err) {
+              reject(err);
+            }
+          };
+          
+          reader.onerror = () => reject(new Error("Erro ao ler arquivo local"));
+          reader.readAsDataURL(file);
+        });
+      });
+
+      // Aguarda TODAS as fotos subirem para o Storage
+      const urls = await Promise.all(uploadPromises);
+
+      setHotelForm(prev => ({
+        ...prev,
+        images: [...(prev.images || []), ...urls]
+      }));
+    } catch (error) {
+      console.error("Erro no upload múltiplo:", error);
+      alert("Falha ao subir algumas fotos. Verifique sua conexão e o Storage do Firebase.");
+    } finally {
+      setIsUploadingImage(false);
+    }
+    
     e.target.value = '';
   };
 
@@ -930,8 +973,19 @@ const TripDetails = () => {
                         </div>
                       </div>
                       <div className="text-right flex items-center space-x-3">
-                        <p className="font-black text-slate-800">{formatCurrency(expense.amount)}</p>
-                        <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors active:scale-90"><Trash2 size={18} /></button>
+                        <div className="flex flex-col items-end">
+                          <p className="font-black text-slate-800">
+                            {formatCurrency((expense as any).currency === 'CLP' ? expense.amount / 180 : expense.amount)}
+                          </p>
+                          {(expense as any).currency === 'CLP' && (
+                            <p className="text-[10px] text-slate-400 font-medium">
+                              CLP {new Intl.NumberFormat('es-CL').format(expense.amount)}
+                            </p>
+                          )}
+                        </div>
+                        <button onClick={() => handleDeleteExpense(expense.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors active:scale-90">
+                          <Trash2 size={18} />
+                        </button>
                       </div>
                     </div>
                   );
@@ -1062,12 +1116,23 @@ const TripDetails = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Início</label>
-                  <input type="time" required value={activityStartTime} onChange={(e) => setActivityStartTime(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fim (Opcional)</label>
-                  <input type="time" value={activityEndTime} onChange={(e) => setActivityEndTime(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" />
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Valor</label>
+                  <div className="flex space-x-2">
+                    <select 
+                      value={expenseCurrency} 
+                      onChange={(e) => setExpenseCurrency(e.target.value as 'BRL' | 'CLP')} 
+                      className="p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold w-24"
+                    >
+                      <option value="BRL">R$</option>
+                      <option value="CLP">CLP</option>
+                    </select>
+                    <input 
+                      type="number" step="0.01" required inputMode="decimal" 
+                      value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} 
+                      placeholder="0,00" 
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary/50 text-slate-800 font-bold" 
+                    />
+                  </div>
                 </div>
               </div>
               <div>
@@ -1226,8 +1291,16 @@ const TripDetails = () => {
                 )}
               </div>
 
-              <button type="submit" className="w-full bg-emerald-600 text-white font-bold text-lg py-4 rounded-2xl mt-2 shadow-lg shadow-emerald-300 active:scale-95">
-                Salvar Opção de Hotel
+              <button 
+                type="submit" 
+                disabled={isUploadingImage}
+                className={`w-full font-bold text-lg py-4 rounded-2xl mt-2 shadow-lg transition-transform ${
+                  isUploadingImage 
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed' 
+                    : 'bg-emerald-600 text-white shadow-emerald-300 active:scale-95'
+                }`}
+              >
+                {isUploadingImage ? 'Enviando fotos...' : 'Salvar Opção de Hotel'}
               </button>
             </form>
           </div>

@@ -38,7 +38,7 @@ const Login = () => {
               pattern="[0-9]*"
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Digite o número secreto"
+              placeholder="Digite a senha"
               className={`w-full px-4 py-4 bg-white border ${
                 error ? 'border-red-500 animate-shake' : 'border-slate-200'
               } rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 text-center text-2xl tracking-widest`}

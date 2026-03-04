@@ -3,6 +3,8 @@ import type { Trip } from '../types/trip';
 import { db } from '../lib/firebase';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { storage } from '../lib/firebase';
 
 interface TripState {
   trips: Trip[];
@@ -12,7 +14,8 @@ interface TripState {
   addTrip: (trip: Trip) => Promise<void>;
   updateTrip: (id: string, updatedTrip: Partial<Trip>) => Promise<void>;
   deleteTrip: (id: string) => Promise<void>;
-  listenToTrips: () => () => void; // Retorna a função de unsubscribe
+  listenToTrips: () => () => void;
+  uploadHotelImage: (tripId: string, hotelId: string, base64Str: string) => Promise<string>;
 }
 
 export const useTripStore = create<TripState>((set, get) => ({
@@ -21,7 +24,7 @@ export const useTripStore = create<TripState>((set, get) => ({
 
   login: (code: string) => {
     // Valida se o código é '1234' (admin padrão) ou o código de alguma viagem específica
-    const isValid = code === '1234' || get().trips.some(t => t.secretCode === code);
+    const isValid = code === '2145' || get().trips.some(t => t.secretCode === code);
     set({ isAuthenticated: isValid });
     return isValid;
   },
@@ -89,4 +92,11 @@ export const useTripStore = create<TripState>((set, get) => ({
       console.error("Erro ao deletar viagem:", error);
     }
   },
+
+  uploadHotelImage: async (tripId, hotelId, base64Str) => {
+    const storageRef = ref(storage, `trips/${tripId}/hotels/${hotelId}/${Date.now()}.jpg`);
+    await uploadString(storageRef, base64Str, 'data_url');
+    
+    return await getDownloadURL(storageRef);
+  }
 }));

@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // SUBSTITUA ESTE OBJETO PELAS SUAS CHAVES DO FIREBASE CONSOLE
 const firebaseConfig = {
@@ -18,6 +19,7 @@ const app = initializeApp(firebaseConfig);
 
 // Inicializa o Firestore (Banco de Dados)
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Ativa a persistência offline (A mágica do PWA para o deserto!)
 enableIndexedDbPersistence(db).catch((err) => {
